@@ -83,10 +83,23 @@ app.on('activate', () => {
 
 app.on('before-quit', async (event) => {
   event.preventDefault()
+  await cleanupAndExit()
+})
+
+// Also handle SIGTERM/SIGINT for graceful shutdown when run from terminal
+process.on('SIGTERM', async () => {
+  await cleanupAndExit()
+})
+
+process.on('SIGINT', async () => {
+  await cleanupAndExit()
+})
+
+async function cleanupAndExit(): Promise<void> {
   destroyTray()
   await kimiWeb.stop()
   app.exit(0)
-})
+}
 
 // Open external links in system browser
 app.on('web-contents-created', (_, wc) => {

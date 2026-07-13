@@ -18,9 +18,30 @@ interface KimiLockFile {
   entry: string
 }
 
-const URL_REGEX = /(https?:\/\/[^\s'"<>]+)/
+const KIMI_SERVER_URL_REGEX = /(?:Kimi server|Local):\s+(https?:\/\/[^\s'"<>#]+)/
+const GENERIC_URL_REGEX = /(https?:\/\/[^\s'"<>#]+)/
 const ALREADY_RUNNING_REGEX = /server already running \(pid=(\d+), port=(\d+)/
-const TOKEN_REGEX = /token[=:]([A-Za-z0-9_-]+)/i
+const TOKEN_REGEX = /[#?&]token=([A-Za-z0-9_-]+)/i
+
+function parseKimiServerUrl(output: string): { url: string; token?: string } | undefined {
+  // Prefer the "Kimi server:" line, which contains the authoritative URL
+  const kimiMatch = output.match(KIMI_SERVER_URL_REGEX)
+  if (kimiMatch) {
+    const url = kimiMatch[1]
+    const tokenMatch = output.match(TOKEN_REGEX)
+    return { url, token: tokenMatch ? tokenMatch[1] : undefined }
+  }
+
+  // Fallback: any URL in the output
+  const genericMatch = output.match(GENERIC_URL_REGEX)
+  if (genericMatch) {
+    const url = genericMatch[1]
+    const tokenMatch = output.match(TOKEN_REGEX)
+    return { url, token: tokenMatch ? tokenMatch[1] : undefined }
+  }
+
+  return undefined
+}
 
 function getKimiCodeHome(): string {
   return process.env.KIMI_CODE_HOME ?? join(homedir(), '.kimi-code')
@@ -165,13 +186,11 @@ export class KimiWebManager {
           return
         }
 
-        const urlMatch = outputBuffer.match(URL_REGEX)
-        if (urlMatch) {
-          const url = urlMatch[1]
-          const tokenMatch = outputBuffer.match(TOKEN_REGEX) ?? url.match(/[?&]token=([^&]+)/)
+        const parsed = parseKimiServerUrl(outputBuffer)
+        if (parsed) {
           onResolve({
-            url,
-            token: tokenMatch ? tokenMatch[1] : undefined,
+            url: parsed.url,
+            token: parsed.token,
             pid: this.process?.pid ?? undefined,
             reused: false,
           })

@@ -25,10 +25,28 @@ onMounted(async () => {
     </div>
 
     <div v-else class="splash">
-      <div class="logo-wrap">
-        <img src="../../assets/kimi-logo.svg" class="logo" alt="Kimi" />
+      <div class="logo-glow">
+        <svg
+          class="logo"
+          viewBox="0 0 32 32"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+          role="img"
+          aria-label="Kimi Code"
+        >
+          <defs>
+            <mask id="kimiEyes" maskUnits="userSpaceOnUse">
+              <rect x="0" y="5" width="32" height="22" fill="#fff"/>
+              <g class="ch-eyes" fill="#000">
+                <rect class="ch-eye" x="11.8" y="12" width="2.8" height="8" rx="1.4"/>
+                <rect class="ch-eye" x="17.4" y="12" width="2.8" height="8" rx="1.4"/>
+              </g>
+            </mask>
+          </defs>
+          <rect x="1" y="6" width="30" height="20" rx="6" fill="#58a6ff" mask="url(#kimiEyes)"/>
+        </svg>
       </div>
-      <div class="spinner"></div>
+
       <p class="status">{{ status }}</p>
       <span v-if="version" class="version">KimiDesk v{{ version }}</span>
     </div>
@@ -41,7 +59,7 @@ onMounted(async () => {
   align-items: center;
   justify-content: center;
   height: 100vh;
-  background: radial-gradient(circle at 50% 30%, #161b22 0%, #0d1117 60%);
+  background: radial-gradient(circle at 50% 35%, #1a2332 0%, #0d1117 55%);
   color: #e6edf3;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
@@ -50,36 +68,51 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 24px;
-  animation: fadeIn 0.4s ease-out;
+  gap: 28px;
+  animation: fadeIn 0.5s ease-out;
 }
 
-.logo-wrap {
-  padding: 24px;
-  border-radius: 24px;
-  background: rgba(88, 166, 255, 0.08);
-  box-shadow: 0 0 60px rgba(88, 166, 255, 0.12);
+.logo-glow {
+  padding: 40px;
+  border-radius: 36px;
+  background: rgba(88, 166, 255, 0.06);
+  box-shadow:
+    0 0 80px rgba(88, 166, 255, 0.15),
+    inset 0 0 60px rgba(88, 166, 255, 0.04);
 }
 
 .logo {
-  width: 80px;
-  height: 56px;
+  width: 120px;
+  height: 84px;
   display: block;
 }
 
-.spinner {
-  width: 28px;
-  height: 28px;
-  border: 3px solid rgba(88, 166, 255, 0.2);
-  border-top-color: #58a6ff;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
+.ch-eyes {
+  animation: kimi-eye-look 16s ease-in-out infinite;
+}
+
+.ch-eye {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: kimi-eye-blink 11s ease-in-out infinite;
+}
+
+@keyframes kimi-eye-look {
+  0%, 42% { transform: translate(0); }
+  84%, 90% { transform: translate(-2px); }
+  95%, 100% { transform: translate(0); }
+}
+
+@keyframes kimi-eye-blink {
+  0%, 94%, 100% { transform: scaleY(1); }
+  96.5%, 98% { transform: scaleY(0.12); }
 }
 
 .status {
-  font-size: 15px;
+  font-size: 16px;
   color: #c9d1d9;
   margin: 0;
+  letter-spacing: 0.02em;
 }
 
 .version {
@@ -112,12 +145,16 @@ onMounted(async () => {
   word-break: break-word;
 }
 
-@keyframes spin {
-  to { transform: rotate(360deg); }
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+@media (prefers-reduced-motion: reduce) {
+  .ch-eyes,
+  .ch-eye,
+  .splash {
+    animation: none;
+  }
 }
 </style>

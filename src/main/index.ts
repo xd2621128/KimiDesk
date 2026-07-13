@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, session, shell } from 'electron'
 import { join } from 'node:path'
 import { KimiWebManager } from './kimi-web'
-import { createMainWindow } from './window'
+import { createMainWindow, loadSplashScreen } from './window'
 import { createTray, destroyTray } from './tray'
 
 const kimiWeb = new KimiWebManager()
@@ -48,6 +48,10 @@ async function startApp(): Promise<void> {
   mainWindow = createMainWindow()
   createTray(mainWindow)
   setupNotificationHandling()
+
+  // Show splash screen immediately while kimi web starts
+  await loadSplashScreen(mainWindow)
+  mainWindow.show()
 
   try {
     const { url, token } = await kimiWeb.start()

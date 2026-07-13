@@ -1,0 +1,32 @@
+{
+  "name": "kimidesk",
+  "version": "1.0.0",
+  "description": "A desktop wrapper for Kimi Code Web UI",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "build:renderer": "vite build",
+    "build:preload": "tsc --project tsconfig.preload.json",
+    "build:main": "tsc --project tsconfig.main.json",
+    "build": "pnpm run build:renderer && pnpm run build:preload && pnpm run build:main",
+    "dev": "pnpm run build && electron .",
+    "dist": "pnpm run build && electron-builder",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "keywords": [
+    "kimi",
+    "electron",
+    "vue"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "@vitejs/plugin-vue": "^6.0.7",
+    "electron": "^43.1.0",
+    "electron-builder": "^26.15.3",
+    "sharp": "^0.35.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.4",
+    "vue": "^3.5.39"
+  }
+}

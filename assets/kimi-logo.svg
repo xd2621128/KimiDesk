@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" role="img" aria-label="Kimi Code">
+  <defs>
+    <mask id="kimiEyes" maskUnits="userSpaceOnUse">
+      <rect x="0" y="5" width="32" height="22" fill="#fff"/>
+      <g fill="#000">
+        <rect class="ch-eye" x="11.8" y="12" width="2.8" height="8" rx="1.4"/>
+        <rect class="ch-eye" x="17.4" y="12" width="2.8" height="8" rx="1.4"/>
+      </g>
+    </mask>
+  </defs>
+  <rect x="1" y="6" width="30" height="20" rx="6" fill="#58a6ff" mask="url(#kimiEyes)"/>
+</svg>

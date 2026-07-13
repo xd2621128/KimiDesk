@@ -1,0 +1,32 @@
+{
+  "appId": "com.kimidesk.app",
+  "productName": "KimiDesk",
+  "directories": {
+    "output": "release",
+    "buildResources": "build"
+  },
+  "files": [
+    "dist/**/*",
+    "assets/**/*",
+    "build/**/*",
+    "package.json"
+  ],
+  "mac": {
+    "category": "public.app-category.developer-tools",
+    "target": ["dmg", "zip"],
+    "icon": "build/icon.png"
+  },
+  "win": {
+    "target": ["nsis", "zip"],
+    "icon": "build/icon.png"
+  },
+  "linux": {
+    "target": ["AppImage", "deb"],
+    "icon": "build/icon.png",
+    "category": "Development"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true
+  }
+}

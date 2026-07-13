@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { homedir, platform } from 'node:os'
 import { join } from 'node:path'
 
@@ -24,7 +24,6 @@ const ALREADY_RUNNING_REGEX = /server already running \(pid=(\d+), port=(\d+)/
 const TOKEN_REGEX = /[#?&]token=([A-Za-z0-9_-]+)/i
 
 function parseKimiServerUrl(output: string): { url: string; token?: string } | undefined {
-  // Prefer the "Kimi server:" line, which contains the authoritative URL
   const kimiMatch = output.match(KIMI_SERVER_URL_REGEX)
   if (kimiMatch) {
     const url = kimiMatch[1]
@@ -32,7 +31,6 @@ function parseKimiServerUrl(output: string): { url: string; token?: string } | u
     return { url, token: tokenMatch ? tokenMatch[1] : undefined }
   }
 
-  // Fallback: any URL in the output
   const genericMatch = output.match(GENERIC_URL_REGEX)
   if (genericMatch) {
     const url = genericMatch[1]
@@ -45,6 +43,24 @@ function parseKimiServerUrl(output: string): { url: string; token?: string } | u
 
 function getKimiCodeHome(): string {
   return process.env.KIMI_CODE_HOME ?? join(homedir(), '.kimi-code')
+}
+
+function findKimiExecutable(): string {
+  const candidates = [
+    join(getKimiCodeHome(), 'bin', 'kimi'),
+    join(homedir(), '.kimi-code', 'bin', 'kimi'),
+    '/usr/local/bin/kimi',
+    '/opt/homebrew/bin/kimi',
+    '/usr/bin/kimi',
+  ]
+
+  for (const path of candidates) {
+    if (existsSync(path)) {
+      return path
+    }
+  }
+
+  return 'kimi'
 }
 
 function readExistingToken(): string | undefined {
@@ -102,7 +118,6 @@ export class KimiWebManager {
   async start(options: { bypassAuth?: boolean; port?: number; host?: string } = {}): Promise<KimiWebInfo> {
     const bypassAuth = options.bypassAuth ?? true
 
-    // 1. If a server is already running, reuse it directly
     const lock = readLockFile()
     const existingToken = readExistingToken()
     if (lock) {
@@ -113,11 +128,11 @@ export class KimiWebManager {
       }
     }
 
-    // 2. Otherwise, start a new one
     const args = buildArgs({ bypassAuth, port: options.port, host: options.host })
+    const command = findKimiExecutable()
+    console.log(`[kimi web] spawning: ${command} ${args.join(' ')}`)
 
     return new Promise((resolve, reject) => {
-      const command = 'kimi'
       let outputBuffer = ''
       let resolved = false
       let timeout: NodeJS.Timeout | null = null
@@ -161,7 +176,7 @@ export class KimiWebManager {
       }
 
       if (!this.process.pid) {
-        onReject(new Error('Failed to start kimi web: no PID'))
+        onReject(new Error(`Failed to start kimi web: no PID (command: ${command})`))
         return
       }
 
@@ -237,11 +252,9 @@ export class KimiWebManager {
         resolve()
       }
 
-      // Try graceful shutdown first
       processToKill.once('exit', finish)
       processToKill.kill('SIGTERM')
 
-      // Force kill after timeout
       setTimeout(() => {
         if (!processToKill.killed) {
           if (platform() === 'win32') {

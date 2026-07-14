@@ -11,6 +11,7 @@
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/version-1.0.1-58a6ff" alt="version">
   <img src="https://img.shields.io/badge/Electron-43-9feaf9?logo=electron" alt="Electron">
   <img src="https://img.shields.io/badge/Vue-3-42b883?logo=vue.js" alt="Vue 3">
   <img src="https://img.shields.io/badge/TypeScript-7-3178c6?logo=typescript" alt="TypeScript">
@@ -57,9 +58,9 @@ pnpm run dev
 
 打包产物位于 `release/` 目录：
 
-- **macOS**: `release/mac-arm64/KimiDesk.app`、`release/KimiDesk-1.0.0-arm64.dmg`
-- **Windows**: `release/win-unpacked/`、`release/KimiDesk-1.0.0.exe`
-- **Linux**: `release/linux-unpacked/`、`release/KimiDesk-1.0.0.AppImage`
+- **macOS**: `release/mac-arm64/KimiDesk.app`、`release/KimiDesk-1.0.1-arm64.dmg`
+- **Windows**: `release/win-unpacked/`、`release/KimiDesk-1.0.1.exe`
+- **Linux**: `release/linux-unpacked/`、`release/KimiDesk-1.0.1.AppImage`
 
 ## 📁 项目结构
 
@@ -70,7 +71,8 @@ KimiDesk/
 │   │   ├── index.ts       # 主进程入口
 │   │   ├── kimi-web.ts    # kimi web 服务管理
 │   │   ├── window.ts      # BrowserWindow 创建
-│   │   └── tray.ts        # 状态栏图标
+│   │   ├── tray.ts        # 状态栏图标
+│   │   └── store.ts       # 本地配置存储
 │   ├── preload/           # preload 脚本
 │   └── renderer/          # Vue 3 渲染进程
 ├── assets/                # 图标、图片资源
@@ -90,6 +92,25 @@ KimiDesk/
 - SVG 源文件：`assets/kimi-logo.svg`
 - 应用图标：`build/icon.png`
 - 状态栏图标：`assets/trayTemplate.png`、`assets/trayTemplate@2x.png`
+
+## 📝 更新日志
+
+### 1.0.1
+
+- 单实例模式：防止重复打开多个 KimiDesk
+- 记住窗口位置和大小
+- macOS Command+W 隐藏窗口
+- 启动失败时弹出原生错误对话框
+- kimi web 异常退出自动重试（最多 3 次）
+- 日志写入 `~/Library/Logs/KimiDesk/`
+
+### 1.0.0
+
+- 初始版本：Electron + Vue 3 + TypeScript 桌面端 wrapper
+- 启动/复用 `kimi web` 服务
+- 自动 token 认证
+- macOS 状态栏图标与系统通知
+- 打包安装支持
 
 ## ⚠️ 注意事项
 

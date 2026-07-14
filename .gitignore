@@ -1,3 +1,5 @@
+.codefree/
+.codefree-mem/
 node_modules/
 dist/
 release/

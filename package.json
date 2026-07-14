@@ -1,6 +1,6 @@
 {
   "name": "kimidesk",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A desktop wrapper for Kimi Code Web UI",
   "main": "dist/main/index.js",
   "scripts": {
@@ -28,5 +28,8 @@
     "typescript": "^7.0.2",
     "vite": "^8.1.4",
     "vue": "^3.5.39"
+  },
+  "dependencies": {
+    "electron-log": "^5.4.4"
   }
 }

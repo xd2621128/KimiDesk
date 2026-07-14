@@ -1,12 +1,34 @@
-import { app, BrowserWindow, ipcMain, session, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron'
+import log from 'electron-log/main'
 import { join } from 'node:path'
+import { appStore } from './store'
 import { KimiWebManager } from './kimi-web'
-import { createMainWindow, loadSplashScreen } from './window'
+import { createMainWindow, loadSplashScreen, type WindowState } from './window'
 import { createTray, destroyTray } from './tray'
+
+// Configure logging before anything else
+log.initialize()
+log.transports.file.level = 'info'
 
 const kimiWeb = new KimiWebManager()
 let mainWindow: BrowserWindow | null = null
 let authToken: string | undefined
+let isQuitting = false
+
+const gotTheLock = app.requestSingleInstanceLock()
+if (!gotTheLock) {
+  log.warn('Another instance is already running, quitting')
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    log.info('Second instance detected, focusing existing window')
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.show()
+      mainWindow.focus()
+    }
+  })
+}
 
 function setupAuthHeader(): void {
   if (!authToken) return
@@ -23,7 +45,6 @@ function setupAuthHeader(): void {
 }
 
 function setupNotificationHandling(): void {
-  // Auto-grant notification permission for Kimi Web
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
     if (permission === 'notifications') {
       callback(true)
@@ -32,7 +53,6 @@ function setupNotificationHandling(): void {
     }
   })
 
-  // Focus window when notification is clicked
   app.on('web-contents-created', (_, wc) => {
     wc.on('notification-click' as never, () => {
       const win = BrowserWindow.fromWebContents(wc)
@@ -44,29 +64,51 @@ function setupNotificationHandling(): void {
   })
 }
 
+function saveWindowState(window: BrowserWindow): void {
+  const bounds = window.getBounds()
+  appStore.setWindowState({
+    width: bounds.width,
+    height: bounds.height,
+    x: bounds.x,
+    y: bounds.y,
+  })
+}
+
 async function startApp(): Promise<void> {
-  mainWindow = createMainWindow()
+  const windowState = appStore.getWindowState()
+  mainWindow = createMainWindow(windowState)
   createTray(mainWindow)
   setupNotificationHandling()
 
-  // Show splash screen immediately while kimi web starts
+  mainWindow.on('close', (event) => {
+    if (process.platform === 'darwin' && !isQuitting) {
+      event.preventDefault()
+      saveWindowState(mainWindow!)
+      mainWindow?.hide()
+    } else {
+      saveWindowState(mainWindow!)
+    }
+  })
+
+  mainWindow.on('moved', () => saveWindowState(mainWindow!))
+  mainWindow.on('resized', () => saveWindowState(mainWindow!))
+
   await loadSplashScreen(mainWindow)
   mainWindow.show()
 
   try {
     const { url, token } = await kimiWeb.start()
-    console.log(`[main] kimi web ready: ${url}`)
+    log.info(`[main] kimi web ready: ${url}`)
     authToken = token
     setupAuthHeader()
 
     await mainWindow.loadURL(url)
   } catch (error) {
-    console.error('[main] failed to start kimi web:', error)
+    const message = error instanceof Error ? error.message : String(error)
+    log.error('[main] failed to start kimi web:', message)
+    dialog.showErrorBox('KimiDesk 启动失败', message)
     if (mainWindow) {
-      mainWindow.webContents.send(
-        'kimi-web-error',
-        error instanceof Error ? error.message : String(error),
-      )
+      mainWindow.webContents.send('kimi-web-error', message)
     }
   }
 }
@@ -81,22 +123,26 @@ app.on('window-all-closed', () => {
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
-    mainWindow = createMainWindow()
+    mainWindow = createMainWindow(appStore.getWindowState())
+  } else {
+    mainWindow?.show()
   }
 })
 
-app.on('before-quit', async (event) => {
+app.on('before-quit', (event) => {
   event.preventDefault()
-  await cleanupAndExit()
+  isQuitting = true
+  cleanupAndExit()
 })
 
-// Also handle SIGTERM/SIGINT for graceful shutdown when run from terminal
-process.on('SIGTERM', async () => {
-  await cleanupAndExit()
+process.on('SIGTERM', () => {
+  isQuitting = true
+  cleanupAndExit()
 })
 
-process.on('SIGINT', async () => {
-  await cleanupAndExit()
+process.on('SIGINT', () => {
+  isQuitting = true
+  cleanupAndExit()
 })
 
 async function cleanupAndExit(): Promise<void> {
@@ -105,7 +151,6 @@ async function cleanupAndExit(): Promise<void> {
   app.exit(0)
 }
 
-// Open external links in system browser
 app.on('web-contents-created', (_, wc) => {
   wc.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)

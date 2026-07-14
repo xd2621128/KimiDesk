@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
+import log from 'electron-log/main'
 import { homedir, platform } from 'node:os'
 import { join } from 'node:path'
 
@@ -114,6 +115,8 @@ function buildArgs(options: {
 export class KimiWebManager {
   private process: ChildProcess | null = null
   private startedByUs = false
+  private restartCount = 0
+  private maxRestarts = 3
 
   async start(options: { bypassAuth?: boolean; port?: number; host?: string } = {}): Promise<KimiWebInfo> {
     const bypassAuth = options.bypassAuth ?? true
@@ -123,14 +126,22 @@ export class KimiWebManager {
     if (lock) {
       const reused = await probeExistingServer(lock, existingToken)
       if (reused) {
-        console.log(`[kimi web] reusing existing server at ${reused.url}`)
+        log.info(`[kimi web] reusing existing server at ${reused.url}`)
         return reused
       }
     }
 
-    const args = buildArgs({ bypassAuth, port: options.port, host: options.host })
+    return this.doStart({ bypassAuth, port: options.port, host: options.host })
+  }
+
+  private async doStart(options: {
+    bypassAuth: boolean
+    port?: number
+    host?: string
+  }): Promise<KimiWebInfo> {
+    const args = buildArgs(options)
     const command = findKimiExecutable()
-    console.log(`[kimi web] spawning: ${command} ${args.join(' ')}`)
+    log.info(`[kimi web] spawning: ${command} ${args.join(' ')}`)
 
     return new Promise((resolve, reject) => {
       let outputBuffer = ''
@@ -148,14 +159,29 @@ export class KimiWebManager {
         if (resolved) return
         resolved = true
         cleanup()
+        this.restartCount = 0
         resolve(info)
       }
 
-      const onReject = (error: Error) => {
+      const onReject = async (error: Error) => {
         if (resolved) return
         resolved = true
         cleanup()
         this.process = null
+
+        if (this.restartCount < this.maxRestarts) {
+          this.restartCount++
+          log.warn(`[kimi web] restart attempt ${this.restartCount}/${this.maxRestarts} after error: ${error.message}`)
+          try {
+            const info = await this.doStart(options)
+            resolve(info)
+            return
+          } catch (retryError) {
+            reject(retryError instanceof Error ? retryError : new Error(String(retryError)))
+            return
+          }
+        }
+
         reject(error)
       }
 
@@ -185,7 +211,7 @@ export class KimiWebManager {
       const handleOutput = (data: Buffer) => {
         const chunk = data.toString()
         outputBuffer += chunk
-        console.log(`[kimi web] ${chunk.trim()}`)
+        log.info(`[kimi web] ${chunk.trim()}`)
 
         const alreadyRunning = outputBuffer.match(ALREADY_RUNNING_REGEX)
         if (alreadyRunning) {
@@ -194,7 +220,7 @@ export class KimiWebManager {
           this.startedByUs = false
           onResolve({
             url: `http://127.0.0.1:${port}`,
-            token: existingToken,
+            token: readExistingToken(),
             pid,
             reused: true,
           })

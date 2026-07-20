@@ -157,7 +157,13 @@ Promise.all([
 - macOS: 输出 `.app`、`.dmg`、`.zip`；
 - Windows: 输出 `.exe`（NSIS）、`.zip`；
 - Linux: 输出 `.AppImage`、`.deb`；
-- 未配置代码签名，macOS 本地运行可能需要在「隐私与安全性」中允许。
+- macOS 使用登录钥匙串中的自签名证书 `KimiDesk Local` 签名（`mac.identity`）。
+  必须使用签名标识与 bundle id（`com.kimidesk.app`）一致的证书：
+  electron-builder 默认的 ad-hoc 签名标识是 `Electron`，与 bundle id 不匹配，
+  会被 macOS usernotificationsd 拒绝（`addRequest not allowed`），导致系统通知完全无法显示。
+  若证书丢失需重建：`openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 3650 -nodes -subj "/CN=KimiDesk Local" -addext "extendedKeyUsage=codeSigning" -addext "keyUsage=critical,digitalSignature"`，
+  导出 p12 后 `security import` 导入登录钥匙串，再 `security add-trusted-cert -r trustRoot -p codeSign` 标记信任。
+- 对已安装的未签名旧版 app，可手动重签修复通知：`codesign --force --deep -s - /Applications/KimiDesk.app`（需先退出 app）。
 
 ## 已知限制
 

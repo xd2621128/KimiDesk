@@ -117,6 +117,7 @@ KimiDesk/
 - `kimi web` 默认端口为 `58627`，若被占用会自动复用已有服务。
 - 应用退出时只会关闭由本应用启动的 `kimi web` 进程；复用已有服务时不会关闭它。
 - macOS 首次运行需要在「系统设置 → 通知」中允许 KimiDesk 发送通知。
+- macOS 打包使用登录钥匙串中的自签名证书 `KimiDesk Local` 签名（`electron-builder.json` 的 `mac.identity`）。不可省略：默认 ad-hoc 签名的标识与 bundle id 不匹配，会导致系统通知被 macOS 静默拒绝。证书重建方法见 `AGENTS.md`。
 
 ## 📄 许可证
 

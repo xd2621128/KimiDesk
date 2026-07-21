@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.0.1-58a6ff" alt="version">
+  <img src="https://img.shields.io/badge/version-1.1.0-58a6ff" alt="version">
   <img src="https://img.shields.io/badge/Electron-43-9feaf9?logo=electron" alt="Electron">
   <img src="https://img.shields.io/badge/Vue-3-42b883?logo=vue.js" alt="Vue 3">
   <img src="https://img.shields.io/badge/TypeScript-7-3178c6?logo=typescript" alt="TypeScript">
@@ -29,6 +29,7 @@
 - 🍎 macOS 状态栏图标，支持显示/隐藏窗口
 - ♻️ 若系统已有 `kimi web` 在运行，直接复用不重复启动
 - 🧹 退出应用时自动关闭由本应用启动的 `kimi web`
+- 📊 底部状态栏实时显示当前会话 token、缓存命中率、生成速度、耗时、额度和加油包余额
 
 ## 📦 环境要求
 
@@ -58,9 +59,17 @@ pnpm run dev
 
 打包产物位于 `release/` 目录：
 
-- **macOS**: `release/mac-arm64/KimiDesk.app`、`release/KimiDesk-1.0.1-arm64.dmg`
-- **Windows**: `release/win-unpacked/`、`release/KimiDesk-1.0.1.exe`
-- **Linux**: `release/linux-unpacked/`、`release/KimiDesk-1.0.1.AppImage`
+- **macOS**: `release/mac-arm64/KimiDesk.app`、`release/KimiDesk-1.1.0-arm64.dmg`
+- **Windows**: `release/win-unpacked/`、`release/KimiDesk-1.1.0.exe`
+- **Linux**: `release/linux-unpacked/`、`release/KimiDesk-1.1.0.AppImage`
+
+## 📊 状态栏
+
+KimiDesk 窗口底部固定状态栏，实时展示当前会话核心指标，并随 Kimi Work 明暗主题自动切换样式。
+
+| 主界面（深色主题） | 启动页 |
+|---|---|
+| <img src="assets/screenshots/statusbar.png" alt="状态栏" width="640"> | <img src="assets/screenshots/splash.png" alt="启动页" width="320"> |
 
 ## 📁 项目结构
 
@@ -94,6 +103,12 @@ KimiDesk/
 - 状态栏图标：`assets/trayTemplate.png`、`assets/trayTemplate@2x.png`
 
 ## 📝 更新日志
+
+### 1.1.0
+
+- 新增底部状态栏：实时显示当前会话 token、缓存命中率、生成速度、耗时、额度和加油包余额
+- 状态栏自动适配 Kimi Work 明暗主题
+- 状态栏指标支持鼠标悬停查看详情 tooltip
 
 ### 1.0.1
 

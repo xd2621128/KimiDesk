@@ -48,15 +48,21 @@ KimiDesk/
 │   ├── main/              # Electron 主进程
 │   │   ├── index.ts       # 主进程入口
 │   │   ├── kimi-web.ts    # kimi web 子进程管理（启动/停止/token/复用）
-│   │   ├── window.ts      # BrowserWindow 创建与配置
+│   │   ├── monitor.ts     # 当前会话指标采集（REST 快照 + WebSocket 订阅）
+│   │   ├── quota.ts       # 额度/加油包余额（Device OAuth + usages API）
+│   │   ├── window.ts      # BrowserWindow + 双 WebContentsView 布局
 │   │   └── tray.ts        # macOS 状态栏图标
 │   ├── preload/           # 安全桥接脚本
-│   │   ├── index.ts
-│   │   └── types.d.ts
+│   │   ├── index.ts       # kimi web 页面桥接 + 主题上报
+│   │   ├── statusbar.ts   # 状态栏页面桥接
+│   │   └── types.d.ts     # 共享类型（SessionMetrics / QuotaState / StatusBarState）
 │   └── renderer/          # Vue 3 渲染进程
 │       ├── main.ts
 │       ├── App.vue
-│       └── index.html
+│       ├── index.html
+│       ├── statusbar.ts   # 底部状态栏入口
+│       ├── StatusBar.vue  # 底部状态栏组件（明/暗双主题）
+│       └── statusbar.html
 ├── assets/                # 静态资源（logo、tray 图标）
 ├── build/                 # electron-builder 使用的应用图标
 ├── dist/                  # TypeScript/Vite 编译输出
@@ -101,6 +107,36 @@ KimiDesk/
 - 从 `~/.kimi-code/server.token` 读取 token；
 - 通过 `session.defaultSession.webRequest.onBeforeSendHeaders` 自动给 `127.0.0.1` / `localhost` 请求注入 `Authorization: Bearer <token>`；
 - 因此用户无需在 Web UI 中手动输入 token。
+
+### 底部状态栏（会话指标 + 额度）
+
+实现文件：`src/main/monitor.ts`、`src/main/quota.ts`、`src/renderer/StatusBar.vue`
+
+- 主窗口是两个 `WebContentsView`：上方 content view 加载 kimi web，下方 30px
+  状态栏 view（`STATUSBAR_HEIGHT`，`src/main/window.ts`），互不影响 DOM；
+- 会话指标（输入/输出 token、缓存命中率、生成速度、上轮耗时、忙闲状态）：
+  - 通过 content view 的 `did-navigate` / `did-navigate-in-page` 跟踪 URL 中的
+    `/sessions/{id}` 定位当前会话；
+  - 先拉 `GET /api/v1/sessions/{id}` 快照（注意响应有 `{code,msg,data}` 包装），
+    再连 `ws://.../api/v1/ws`（子协议 `kimi-code.bearer.<token>`）订阅增量事件，
+    用 `last_seq` 游标去重；
+  - 速度 = `usage.output / llmStreamDurationMs`（来自 `turn.step.completed`），
+    耗时 = `turn.ended` 的 `durationMs`；
+  - 注意：kimi web 输出的 URL 带尾部斜杠，拼接 API 路径前必须去掉，
+    否则 `//api/...` 会被 SPA fallback 成 HTML（monitor.ts 的 configure 已处理）；
+  - 状态栏内的重置倒计时平时不显示，鼠标悬停在额度条上时，百分比数字会
+    临时替换为倒计时（如 `5h [bar] 2h15m后`），移走恢复。没有 tooltip，
+    没有覆盖层，不改动视图大小；
+- 额度与加油包余额：`src/main/quota.ts` 走独立的 Kimi Device OAuth
+  （`auth.kimi.com/api/oauth/device_authorization`，token 存
+  `userData/quota-auth.json`，故意不碰 CLI 凭据），再请求
+  `https://api.kimi.com/coding/v1/usages`，每 60s 轮询（30s 缓存）；
+- 主题跟随：kimi web 用 `document.documentElement.dataset.colorScheme`
+  （light/dark/system）+ `prefers-color-scheme` 决定明暗，preload
+  （`src/preload/index.ts`）监听后通过 `monitor:page-theme` 上报给主进程，
+  状态栏据此切换 CSS 变量；
+- IPC：`monitor:state`（主→渲染推送全量状态）、`monitor:refresh`、
+  `monitor:authorize`、`monitor:open-quota-page`。
 
 ### 通知
 

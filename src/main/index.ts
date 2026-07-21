@@ -1,19 +1,24 @@
 import { app, BrowserWindow, dialog, ipcMain, session, shell } from 'electron'
 import log from 'electron-log/main'
-import { join } from 'node:path'
 import { appStore } from './store'
 import { KimiWebManager } from './kimi-web'
-import { createMainWindow, loadSplashScreen, type WindowState } from './window'
+import { SessionMonitor } from './monitor'
+import { QuotaManager, QUOTA_PAGE_URL, QUOTA_POLL_INTERVAL_MS } from './quota'
+import { createMainWindow, loadSplashScreen, type MainViews } from './window'
 import { createTray, destroyTray } from './tray'
+import type { StatusBarState } from '../preload/types'
 
 // Configure logging before anything else
 log.initialize()
 log.transports.file.level = 'info'
 
 const kimiWeb = new KimiWebManager()
-let mainWindow: BrowserWindow | null = null
+const monitor = new SessionMonitor()
+const quota = new QuotaManager()
+let views: MainViews | null = null
 let authToken: string | undefined
 let isQuitting = false
+let pageTheme: 'light' | 'dark' = 'dark'
 
 const gotTheLock = app.requestSingleInstanceLock()
 if (!gotTheLock) {
@@ -22,12 +27,22 @@ if (!gotTheLock) {
 } else {
   app.on('second-instance', () => {
     log.info('Second instance detected, focusing existing window')
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore()
-      mainWindow.show()
-      mainWindow.focus()
+    if (views) {
+      if (views.window.isMinimized()) views.window.restore()
+      views.window.show()
+      views.window.focus()
     }
   })
+}
+
+function pushStatusBarState(): void {
+  if (!views || views.statusbar.webContents.isDestroyed()) return
+  const state: StatusBarState = {
+    theme: pageTheme,
+    metrics: monitor.getMetrics(),
+    quota: quota.getState(),
+  }
+  views.statusbar.webContents.send('monitor:state', state)
 }
 
 function setupAuthHeader(): void {
@@ -74,26 +89,61 @@ function saveWindowState(window: BrowserWindow): void {
   })
 }
 
+function setupStatusBarIpc(): void {
+  monitor.onUpdate(pushStatusBarState)
+  quota.onUpdate(pushStatusBarState)
+
+  ipcMain.on('monitor:page-theme', (event, theme) => {
+    if (event.sender !== views?.content.webContents) return
+    const next = theme === 'light' ? 'light' : 'dark'
+    if (next !== pageTheme) {
+      pageTheme = next
+      pushStatusBarState()
+    }
+  })
+
+  ipcMain.on('monitor:refresh', () => {
+    monitor.refresh()
+    quota.refresh().catch((error) => log.warn('[quota] refresh failed:', error))
+  })
+
+  ipcMain.on('monitor:authorize', () => {
+    quota.authorize().catch((error) => log.warn('[quota] authorize failed:', error))
+  })
+
+  ipcMain.on('monitor:open-quota-page', () => {
+    void shell.openExternal(QUOTA_PAGE_URL)
+  })
+
+}
+
 async function startApp(): Promise<void> {
-  const windowState = appStore.getWindowState()
-  mainWindow = createMainWindow(windowState)
+  views = createMainWindow(appStore.getWindowState())
+  const { window: mainWindow, content, statusbar } = views
   createTray(mainWindow)
   setupNotificationHandling()
 
   mainWindow.on('close', (event) => {
     if (process.platform === 'darwin' && !isQuitting) {
       event.preventDefault()
-      saveWindowState(mainWindow!)
-      mainWindow?.hide()
+      saveWindowState(mainWindow)
+      mainWindow.hide()
     } else {
-      saveWindowState(mainWindow!)
+      saveWindowState(mainWindow)
     }
   })
 
-  mainWindow.on('moved', () => saveWindowState(mainWindow!))
-  mainWindow.on('resized', () => saveWindowState(mainWindow!))
+  mainWindow.on('moved', () => saveWindowState(mainWindow))
+  mainWindow.on('resized', () => saveWindowState(mainWindow))
 
-  await loadSplashScreen(mainWindow)
+  // 跟踪 kimi web 页面（SPA）路由变化，定位当前会话
+  const trackNavigation = () => monitor.handleNavigate(content.webContents.getURL())
+  content.webContents.on('did-navigate', trackNavigation)
+  content.webContents.on('did-navigate-in-page', trackNavigation)
+
+  statusbar.webContents.on('did-finish-load', pushStatusBarState)
+
+  await loadSplashScreen(views)
   mainWindow.show()
 
   try {
@@ -101,19 +151,26 @@ async function startApp(): Promise<void> {
     log.info(`[main] kimi web ready: ${url}`)
     authToken = token
     setupAuthHeader()
+    monitor.configure(url, token)
 
-    await mainWindow.loadURL(url)
+    await content.webContents.loadURL(url)
+    trackNavigation()
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     log.error('[main] failed to start kimi web:', message)
     dialog.showErrorBox('KimiDesk 启动失败', message)
-    if (mainWindow) {
-      mainWindow.webContents.send('kimi-web-error', message)
-    }
+    content.webContents.send('kimi-web-error', message)
   }
 }
 
-app.whenReady().then(startApp)
+app.whenReady().then(() => {
+  setupStatusBarIpc()
+  void startApp()
+  quota.init().catch((error) => log.warn('[quota] init failed:', error))
+  setInterval(() => {
+    quota.refresh().catch((error) => log.warn('[quota] poll failed:', error))
+  }, QUOTA_POLL_INTERVAL_MS)
+})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
@@ -123,9 +180,9 @@ app.on('window-all-closed', () => {
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
-    mainWindow = createMainWindow(appStore.getWindowState())
+    void startApp()
   } else {
-    mainWindow?.show()
+    views?.window.show()
   }
 })
 
@@ -146,6 +203,8 @@ process.on('SIGINT', () => {
 })
 
 async function cleanupAndExit(): Promise<void> {
+  monitor.dispose()
+  quota.dispose()
   destroyTray()
   await kimiWeb.stop()
   app.exit(0)

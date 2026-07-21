@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import log from 'electron-log/main'
 import { homedir, platform } from 'node:os'
 import { join } from 'node:path'
@@ -17,6 +17,23 @@ interface KimiLockFile {
   port: number
   host_version: string
   entry: string
+}
+
+// kimi >= 0.28 records running servers here instead of the legacy server/lock file
+interface KimiInstanceFile {
+  server_id: string
+  pid: number
+  host: string
+  port: number
+  started_at: number
+  heartbeat_at: number
+  host_version: string
+}
+
+interface ServerCandidate {
+  pid: number
+  host: string
+  port: number
 }
 
 const KIMI_SERVER_URL_REGEX = /(?:Kimi server|Local):\s+(https?:\/\/[^\s'"<>#]+)/
@@ -83,7 +100,33 @@ function readLockFile(): KimiLockFile | undefined {
   }
 }
 
-async function probeExistingServer(info: KimiLockFile, token?: string): Promise<KimiWebInfo | undefined> {
+function readInstanceFiles(): KimiInstanceFile[] {
+  try {
+    const dir = join(getKimiCodeHome(), 'server', 'instances')
+    return readdirSync(dir)
+      .filter((f) => f.endsWith('.json'))
+      .map((f) => {
+        try {
+          return JSON.parse(readFileSync(join(dir, f), 'utf-8')) as KimiInstanceFile
+        } catch {
+          return undefined
+        }
+      })
+      .filter((i): i is KimiInstanceFile => Boolean(i && i.pid && i.host && i.port))
+      .sort((a, b) => (b.heartbeat_at ?? 0) - (a.heartbeat_at ?? 0))
+  } catch {
+    return []
+  }
+}
+
+function readServerCandidates(): ServerCandidate[] {
+  const candidates: ServerCandidate[] = readInstanceFiles()
+  const lock = readLockFile()
+  if (lock) candidates.push(lock)
+  return candidates
+}
+
+async function probeExistingServer(info: ServerCandidate, token?: string): Promise<KimiWebInfo | undefined> {
   const url = `http://${info.host}:${info.port}`
   const metaUrl = `${url}/api/v1/meta`
   const headers: Record<string, string> = {}
@@ -100,12 +143,46 @@ async function probeExistingServer(info: KimiLockFile, token?: string): Promise<
   return undefined
 }
 
+// kimi >= 0.28 removed `web --foreground` / `--keep-alive` (foreground is the
+// default); detect support once from `kimi web --help` so older installs keep working.
+let legacyWebFlags: boolean | undefined
+
+async function detectLegacyWebFlags(command: string): Promise<boolean> {
+  if (legacyWebFlags !== undefined) return legacyWebFlags
+  try {
+    const help = await new Promise<string>((resolve, reject) => {
+      const child = spawn(command, ['web', '--help'], { stdio: ['ignore', 'pipe', 'pipe'] })
+      let out = ''
+      child.stdout?.on('data', (d: Buffer) => (out += d.toString()))
+      child.stderr?.on('data', (d: Buffer) => (out += d.toString()))
+      const timer = setTimeout(() => {
+        child.kill()
+        reject(new Error('timeout'))
+      }, 10000)
+      child.on('exit', () => {
+        clearTimeout(timer)
+        resolve(out)
+      })
+      child.on('error', (error) => {
+        clearTimeout(timer)
+        reject(error)
+      })
+    })
+    legacyWebFlags = help.includes('--foreground')
+  } catch {
+    legacyWebFlags = false
+  }
+  return legacyWebFlags
+}
+
 function buildArgs(options: {
   bypassAuth: boolean
   port?: number
   host?: string
+  legacyFlags: boolean
 }): string[] {
-  const args = ['web', '--foreground', '--no-open', '--keep-alive']
+  const args = ['web', '--no-open']
+  if (options.legacyFlags) args.push('--foreground', '--keep-alive')
   if (options.bypassAuth) args.push('--dangerous-bypass-auth')
   if (options.port) args.push('--port', String(options.port))
   if (options.host) args.push('--host', options.host)
@@ -121,10 +198,9 @@ export class KimiWebManager {
   async start(options: { bypassAuth?: boolean; port?: number; host?: string } = {}): Promise<KimiWebInfo> {
     const bypassAuth = options.bypassAuth ?? true
 
-    const lock = readLockFile()
     const existingToken = readExistingToken()
-    if (lock) {
-      const reused = await probeExistingServer(lock, existingToken)
+    for (const candidate of readServerCandidates()) {
+      const reused = await probeExistingServer(candidate, existingToken)
       if (reused) {
         log.info(`[kimi web] reusing existing server at ${reused.url}`)
         return reused
@@ -139,8 +215,9 @@ export class KimiWebManager {
     port?: number
     host?: string
   }): Promise<KimiWebInfo> {
-    const args = buildArgs(options)
     const command = findKimiExecutable()
+    const legacyFlags = await detectLegacyWebFlags(command)
+    const args = buildArgs({ ...options, legacyFlags })
     log.info(`[kimi web] spawning: ${command} ${args.join(' ')}`)
 
     return new Promise((resolve, reject) => {

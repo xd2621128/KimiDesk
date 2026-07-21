@@ -79,11 +79,14 @@ KimiDesk/
 
 启动流程：
 
-1. 先读取 `~/.kimi-code/server/lock` 检测是否已有服务；
-2. 若服务可达，直接复用，`reused = true`；
-3. 若无可用服务，执行 `kimi web --foreground --no-open --keep-alive --dangerous-bypass-auth`；
+1. 读取 `~/.kimi-code/server/instances/*.json`（kimi ≥ 0.28）和旧版 `~/.kimi-code/server/lock`，按心跳时间排序作为候选；
+2. 逐个探测 `/api/v1/meta`，服务可达则直接复用，`reused = true`；
+3. 若无可用服务，执行 `kimi web --no-open --dangerous-bypass-auth`；
+   - kimi ≥ 0.28 已删除 `--foreground` / `--keep-alive`（默认前台运行），
+     应用通过 `kimi web --help` 自动检测，仅旧版本才追加这两个参数；
+   - kimi ≥ 0.28 在端口被占用时自动递增端口，不再输出 `server already running`；
 4. 从 stdout 捕获 URL 和 token；
-5. 若启动输出 `server already running`，也按复用处理。
+5. 若启动输出 `server already running`（旧版本），也按复用处理。
 
 停止流程：
 

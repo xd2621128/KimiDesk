@@ -1,19 +1,50 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import type { UpdateState } from '@/preload/types'
 
 const error = ref('')
 const version = ref('')
-const status = ref('正在启动 Kimi Web...')
+const update = ref<UpdateState>({ phase: 'idle' })
+
+const status = computed(() => {
+  if (error.value) return '启动失败'
+  switch (update.value.phase) {
+    case 'checking':
+      return '正在检查 Kimi Code 更新…'
+    case 'updating':
+      return '正在更新 Kimi Code，请稍候…'
+    case 'done':
+      return '更新完成，正在重启应用…'
+    default:
+      return '正在启动 Kimi Web...'
+  }
+})
+
+/** 更新流程相关界面是否取代普通状态行 */
+const showUpdatePanel = computed(() =>
+  ['available', 'updating', 'done', 'error'].includes(update.value.phase),
+)
 
 onMounted(async () => {
   if (window.electronAPI) {
     version.value = await window.electronAPI.getAppVersion()
     window.electronAPI.onKimiWebError((message) => {
       error.value = message
-      status.value = '启动失败'
+    })
+    update.value = await window.electronAPI.getUpdateState()
+    window.electronAPI.onUpdateState((state) => {
+      update.value = state
     })
   }
 })
+
+function confirmUpdate() {
+  window.electronAPI?.confirmUpdate()
+}
+
+function skipUpdate() {
+  window.electronAPI?.skipUpdate()
+}
 </script>
 
 <template>
@@ -47,7 +78,35 @@ onMounted(async () => {
         </svg>
       </div>
 
-      <p class="status">{{ status }}</p>
+      <div v-if="showUpdatePanel" class="update-panel">
+        <template v-if="update.phase === 'available'">
+          <h2 class="update-title">发现 Kimi Code 新版本</h2>
+          <p class="update-versions">v{{ update.current }} → v{{ update.latest }}</p>
+          <div class="update-actions">
+            <button class="btn primary" @click="confirmUpdate">立即更新并重启</button>
+            <button class="btn ghost" @click="skipUpdate">暂不更新</button>
+          </div>
+        </template>
+
+        <template v-else-if="update.phase === 'error'">
+          <h2 class="update-title failed">更新失败</h2>
+          <p class="update-message">{{ update.message }}</p>
+          <div class="update-actions">
+            <button class="btn primary" @click="confirmUpdate">重试</button>
+            <button class="btn ghost" @click="skipUpdate">暂不更新</button>
+          </div>
+        </template>
+
+        <template v-else>
+          <div class="update-working">
+            <span v-if="update.phase === 'updating'" class="spinner"></span>
+            <p class="status">{{ status }}</p>
+          </div>
+        </template>
+      </div>
+
+      <p v-else class="status">{{ status }}</p>
+
       <span v-if="version" class="version">KimiDesk v{{ version }}</span>
     </div>
   </div>
@@ -120,6 +179,98 @@ onMounted(async () => {
   color: #8b949e;
 }
 
+.update-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  max-width: 420px;
+  text-align: center;
+  animation: fadeIn 0.3s ease-out;
+}
+
+.update-title {
+  margin: 0;
+  font-size: 20px;
+  color: #e6edf3;
+}
+
+.update-title.failed {
+  color: #f85149;
+}
+
+.update-versions {
+  margin: 0;
+  font-size: 15px;
+  color: #58a6ff;
+  font-variant-numeric: tabular-nums;
+}
+
+.update-message {
+  margin: 0;
+  font-size: 13px;
+  color: #8b949e;
+  line-height: 1.6;
+  word-break: break-word;
+  max-height: 96px;
+  overflow: hidden;
+}
+
+.update-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.btn {
+  padding: 8px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.btn.primary {
+  background: #58a6ff;
+  color: #0d1117;
+  font-weight: 600;
+}
+
+.btn.primary:hover {
+  background: #79b8ff;
+}
+
+.btn.ghost {
+  background: transparent;
+  color: #8b949e;
+  border-color: #30363d;
+}
+
+.btn.ghost:hover {
+  color: #c9d1d9;
+  border-color: #8b949e;
+}
+
+.update-working {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(88, 166, 255, 0.25);
+  border-top-color: #58a6ff;
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 .error-panel {
   text-align: center;
   padding: 32px;
@@ -153,7 +304,8 @@ onMounted(async () => {
 @media (prefers-reduced-motion: reduce) {
   .ch-eyes,
   .ch-eye,
-  .splash {
+  .splash,
+  .update-panel {
     animation: none;
   }
 }

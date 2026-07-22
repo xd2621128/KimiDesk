@@ -63,7 +63,7 @@ function getKimiCodeHome(): string {
   return process.env.KIMI_CODE_HOME ?? join(homedir(), '.kimi-code')
 }
 
-function findKimiExecutable(): string {
+export function findKimiExecutable(): string {
   const candidates = [
     join(getKimiCodeHome(), 'bin', 'kimi'),
     join(homedir(), '.kimi-code', 'bin', 'kimi'),

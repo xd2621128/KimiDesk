@@ -50,12 +50,13 @@ KimiDesk/
 │   │   ├── kimi-web.ts    # kimi web 子进程管理（启动/停止/token/复用）
 │   │   ├── monitor.ts     # 当前会话指标采集（REST 快照 + WebSocket 订阅）
 │   │   ├── quota.ts       # 额度/加油包余额（Device OAuth + usages API）
+│   │   ├── updater.ts     # 启动时 kimi code 更新检查与升级
 │   │   ├── window.ts      # BrowserWindow + 双 WebContentsView 布局
 │   │   └── tray.ts        # macOS 状态栏图标
 │   ├── preload/           # 安全桥接脚本
 │   │   ├── index.ts       # kimi web 页面桥接 + 主题上报
 │   │   ├── statusbar.ts   # 状态栏页面桥接
-│   │   └── types.d.ts     # 共享类型（SessionMetrics / QuotaState / StatusBarState）
+│   │   └── types.d.ts     # 共享类型（SessionMetrics / QuotaState / StatusBarState / UpdateState）
 │   └── renderer/          # Vue 3 渲染进程
 │       ├── main.ts
 │       ├── App.vue
@@ -78,6 +79,25 @@ KimiDesk/
 ```
 
 ## 关键实现
+
+### 启动时 kimi code 更新检查
+
+实现文件：`src/main/updater.ts`、`src/main/index.ts`、`src/renderer/App.vue`
+
+- 时机：`startApp()` 中 splash 显示之后、`kimiWeb.start()` 之前；
+- 检查：并行执行 `kimi --version`（当前版本）和
+  `GET https://code.kimi.com/kimi-code/latest`（最新版本，纯文本），各 5s 超时；
+  任何失败（断网、命令缺失、超时）都静默跳过，不阻塞启动；
+- 有更新时 splash 页面展示更新卡片（`v当前 → v最新`，「立即更新并重启」/「暂不更新」），
+  用户确认后执行 `kimi upgrade`（就地升级 `~/.kimi-code`，300s 超时），
+  成功后 `app.relaunch()` + `app.exit(0)`（`app.exit` 不触发 `before-quit`，
+  不会被 quit 拦截逻辑影响）；失败可重试或跳过；
+- 状态机：`idle → checking → available → updating → done/error`，
+  主进程保存最新 `UpdateState` 并推送到 splash；
+- IPC：`update:state`（主→渲染推送）、`update:get-state`（挂载时拉取，
+  消除推送时序竞争）、`update:confirm`、`update:skip`（均校验 sender 是 content view）；
+- 边界：复用用户自启的 kimi web 服务时，升级只替换二进制，
+  运行中的旧版服务不受影响，也不会被杀掉。
 
 ### kimi web 服务管理
 
@@ -117,11 +137,30 @@ KimiDesk/
 - 会话指标（输入/输出 token、缓存命中率、生成速度、上轮耗时、忙闲状态）：
   - 通过 content view 的 `did-navigate` / `did-navigate-in-page` 跟踪 URL 中的
     `/sessions/{id}` 定位当前会话；
+  - 注意：`history.replaceState` 不触发 `did-navigate-in-page`（kimi web 首次
+    点开旧会话正是用 replaceState 更新 URL），因此 preload
+    （`src/preload/index.ts` 的 `setupUrlReporter`）每 500ms 轮询
+    `location.href`，变化时通过 `monitor:page-url` 上报给主进程，
+    与导航事件一样走 `monitor.handleNavigate(url, true)`；
+  - 回退跟踪：启动时 kimi web 恢复上次会话可能不产生页面内导航事件，
+    导致一直跟踪不到会话；`configure()` 后 2.5s 起，若仍未跟踪到会话，
+    轮询 `GET /api/v1/sessions`（按 updated_at 倒序）自动选择——优先
+    busy 会话，否则最近更新的会话。一旦出现页面内导航（`inPage=true`），
+    回退机制永久让位（如用户回到首页时不会强行重新跟踪）；
   - 先拉 `GET /api/v1/sessions/{id}` 快照（注意响应有 `{code,msg,data}` 包装），
     再连 `ws://.../api/v1/ws`（子协议 `kimi-code.bearer.<token>`）订阅增量事件，
     用 `last_seq` 游标去重；
+  - 注意：REST 快照的 `usage` / `last_seq` 恒为 0（服务端不回填历史统计），
+    真实 token 数据来自 WS 订阅后服务端回放的事件缓冲；未驻留的旧会话
+    （服务启动后还没打开过）订阅 ack 会返回 `resync_required`，此时拉一次
+    `GET /api/v1/sessions/{id}/messages?limit=1` 触发服务端加载会话，
+    再重发 `client_hello` 重新订阅即可拿到回放（monitor.ts 的
+    `handleAck` / `resyncSession`，每次 WS 连接最多重试 2 次）；
   - 速度 = `usage.output / llmStreamDurationMs`（来自 `turn.step.completed`），
     耗时 = `turn.ended` 的 `durationMs`；
+  - 同一会话的 WS 会广播所有 agent（含子 agent `agent-N`）的 `turn.*` 事件，
+    必须按 `payload.agentId` 过滤、只处理 `'main'`（缺失时按 main 对待），
+    否则子 agent 的 `turn.ended` 会覆盖耗时并把状态误置为空闲；
   - 注意：kimi web 输出的 URL 带尾部斜杠，拼接 API 路径前必须去掉，
     否则 `//api/...` 会被 SPA fallback 成 HTML（monitor.ts 的 configure 已处理）；
   - 状态栏内的重置倒计时平时不显示，鼠标悬停在额度条上时，百分比数字会
@@ -136,7 +175,8 @@ KimiDesk/
   （`src/preload/index.ts`）监听后通过 `monitor:page-theme` 上报给主进程，
   状态栏据此切换 CSS 变量；
 - IPC：`monitor:state`（主→渲染推送全量状态）、`monitor:refresh`、
-  `monitor:authorize`、`monitor:open-quota-page`。
+  `monitor:authorize`、`monitor:open-quota-page`、`monitor:page-url`
+  （preload 上报页面 URL 变化）、`monitor:page-theme`（preload 上报主题）。
 
 ### 通知
 

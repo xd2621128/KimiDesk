@@ -6,7 +6,8 @@ import { SessionMonitor } from './monitor'
 import { QuotaManager, QUOTA_PAGE_URL, QUOTA_POLL_INTERVAL_MS } from './quota'
 import { createMainWindow, loadSplashScreen, type MainViews } from './window'
 import { createTray, destroyTray } from './tray'
-import type { StatusBarState } from '../preload/types'
+import { checkKimiCodeUpdate, runKimiUpgrade } from './updater'
+import type { StatusBarState, UpdateState } from '../preload/types'
 
 // Configure logging before anything else
 log.initialize()
@@ -19,6 +20,8 @@ let views: MainViews | null = null
 let authToken: string | undefined
 let isQuitting = false
 let pageTheme: 'light' | 'dark' = 'dark'
+let updateState: UpdateState = { phase: 'idle' }
+let relaunching = false
 
 const gotTheLock = app.requestSingleInstanceLock()
 if (!gotTheLock) {
@@ -43,6 +46,76 @@ function pushStatusBarState(): void {
     quota: quota.getState(),
   }
   views.statusbar.webContents.send('monitor:state', state)
+}
+
+function setUpdateState(state: UpdateState): void {
+  updateState = state
+  if (!views || views.content.webContents.isDestroyed()) return
+  views.content.webContents.send('update:state', state)
+}
+
+/** 等待 splash 页面上的用户选择（立即更新 / 暂不更新） */
+function waitUpdateChoice(): Promise<'update' | 'skip'> {
+  return new Promise((resolve) => {
+    const cleanup = () => {
+      ipcMain.removeListener('update:confirm', onConfirm)
+      ipcMain.removeListener('update:skip', onSkip)
+    }
+    const onConfirm = (event: Electron.IpcMainEvent) => {
+      if (event.sender !== views?.content.webContents) return
+      cleanup()
+      resolve('update')
+    }
+    const onSkip = (event: Electron.IpcMainEvent) => {
+      if (event.sender !== views?.content.webContents) return
+      cleanup()
+      resolve('skip')
+    }
+    ipcMain.on('update:confirm', onConfirm)
+    ipcMain.on('update:skip', onSkip)
+  })
+}
+
+/**
+ * 启动时检查 kimi code 更新。有更新且用户确认时执行 `kimi upgrade`，
+ * 成功后 relaunch 应用；检查失败/无更新/用户跳过都静默返回继续启动。
+ */
+async function maybeUpdateKimiCode(): Promise<void> {
+  setUpdateState({ phase: 'checking' })
+  const result = await checkKimiCodeUpdate()
+  if (result.status !== 'available') {
+    setUpdateState({ phase: 'idle' })
+    return
+  }
+
+  const { current, latest } = result
+  setUpdateState({ phase: 'available', current, latest })
+  let choice = await waitUpdateChoice()
+
+  while (choice === 'update') {
+    setUpdateState({ phase: 'updating', current, latest })
+    try {
+      await runKimiUpgrade()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      log.error('[update] upgrade failed:', message)
+      setUpdateState({ phase: 'error', message, current, latest })
+      choice = await waitUpdateChoice()
+      continue
+    }
+
+    log.info('[update] upgrade succeeded, relaunching')
+    setUpdateState({ phase: 'done' })
+    relaunching = true
+    // 稍等片刻让用户看到「更新完成」提示；app.exit 不触发 before-quit
+    setTimeout(() => {
+      app.relaunch()
+      app.exit(0)
+    }, 800)
+    return
+  }
+
+  setUpdateState({ phase: 'idle' })
 }
 
 function setupAuthHeader(): void {
@@ -102,6 +175,14 @@ function setupStatusBarIpc(): void {
     }
   })
 
+  // 页面侧轮询上报的 URL 变化（history.replaceState 不触发 did-navigate-in-page，
+  // 见 preload/index.ts 的 setupUrlReporter）
+  ipcMain.on('monitor:page-url', (event, url) => {
+    if (event.sender !== views?.content.webContents) return
+    if (typeof url !== 'string') return
+    monitor.handleNavigate(url, true)
+  })
+
   ipcMain.on('monitor:refresh', () => {
     monitor.refresh()
     quota.refresh().catch((error) => log.warn('[quota] refresh failed:', error))
@@ -139,12 +220,16 @@ async function startApp(): Promise<void> {
   // 跟踪 kimi web 页面（SPA）路由变化，定位当前会话
   const trackNavigation = () => monitor.handleNavigate(content.webContents.getURL())
   content.webContents.on('did-navigate', trackNavigation)
-  content.webContents.on('did-navigate-in-page', trackNavigation)
+  content.webContents.on('did-navigate-in-page', (_event, url) => monitor.handleNavigate(url, true))
 
   statusbar.webContents.on('did-finish-load', pushStatusBarState)
 
   await loadSplashScreen(views)
   mainWindow.show()
+
+  // 先检查 kimi code 更新；若触发升级重启则不再继续启动
+  await maybeUpdateKimiCode()
+  if (relaunching) return
 
   try {
     const { url, token } = await kimiWeb.start()
@@ -218,3 +303,6 @@ app.on('web-contents-created', (_, wc) => {
 })
 
 ipcMain.handle('get-app-version', () => app.getVersion())
+
+// splash 挂载时拉取一次，消除 update:state 推送的时序竞争
+ipcMain.handle('update:get-state', () => updateState)

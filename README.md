@@ -30,6 +30,7 @@
 - ♻️ 若系统已有 `kimi web` 在运行，直接复用不重复启动
 - 🧹 退出应用时自动关闭由本应用启动的 `kimi web`
 - 📊 底部状态栏实时显示当前会话 token、缓存命中率、生成速度、耗时、额度和加油包余额
+- ⬆️ 启动时自动检查 kimi code 更新，可一键升级并重启
 
 ## 📦 环境要求
 
@@ -79,7 +80,10 @@ KimiDesk/
 │   ├── main/              # Electron 主进程
 │   │   ├── index.ts       # 主进程入口
 │   │   ├── kimi-web.ts    # kimi web 服务管理
-│   │   ├── window.ts      # BrowserWindow 创建
+│   │   ├── monitor.ts     # 会话指标采集
+│   │   ├── quota.ts       # 额度/余额查询
+│   │   ├── updater.ts     # kimi code 更新检查与升级
+│   │   ├── window.ts      # 窗口与视图布局
 │   │   ├── tray.ts        # 状态栏图标
 │   │   └── store.ts       # 本地配置存储
 │   ├── preload/           # preload 脚本
@@ -109,6 +113,8 @@ KimiDesk/
 - 新增底部状态栏：实时显示当前会话 token、缓存命中率、生成速度、耗时、额度和加油包余额
 - 状态栏自动适配 Kimi Work 明暗主题
 - 状态栏指标支持鼠标悬停查看详情 tooltip
+- 启动时自动检查 kimi code 更新，启动页可一键升级并重启
+- 修复首次打开旧会话时状态栏不更新：旧会话未驻留服务端时 WS 订阅需 resync（拉一条消息触发加载后重新订阅获取事件回放），且 `history.replaceState` 导航不触发 `did-navigate-in-page`（preload 轮询 URL 变化兜底上报）
 
 ### 1.0.1
 

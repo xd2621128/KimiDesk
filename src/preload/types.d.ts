@@ -35,11 +35,23 @@ export interface StatusBarState {
   quota: QuotaState
 }
 
+/** 启动时 kimi code 更新检查的状态（main → splash 页面） */
+export interface UpdateState {
+  phase: 'idle' | 'checking' | 'available' | 'updating' | 'done' | 'error'
+  current?: string
+  latest?: string
+  message?: string
+}
+
 declare global {
   interface Window {
     electronAPI?: {
       getAppVersion: () => Promise<string>
       onKimiWebError: (callback: (message: string) => void) => void
+      getUpdateState: () => Promise<UpdateState>
+      onUpdateState: (callback: (state: UpdateState) => void) => void
+      confirmUpdate: () => void
+      skipUpdate: () => void
     }
     kimiStatusbar?: {
       onState: (callback: (state: StatusBarState) => void) => void

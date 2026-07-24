@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.1.0-58a6ff" alt="version">
+  <img src="https://img.shields.io/badge/version-1.1.1-58a6ff" alt="version">
   <img src="https://img.shields.io/badge/Electron-43-9feaf9?logo=electron" alt="Electron">
   <img src="https://img.shields.io/badge/Vue-3-42b883?logo=vue.js" alt="Vue 3">
   <img src="https://img.shields.io/badge/TypeScript-7-3178c6?logo=typescript" alt="TypeScript">
@@ -60,9 +60,9 @@ pnpm run dev
 
 打包产物位于 `release/` 目录：
 
-- **macOS**: `release/mac-arm64/KimiDesk.app`、`release/KimiDesk-1.1.0-arm64.dmg`
-- **Windows**: `release/win-unpacked/`、`release/KimiDesk-1.1.0.exe`
-- **Linux**: `release/linux-unpacked/`、`release/KimiDesk-1.1.0.AppImage`
+- **macOS**: `release/mac-arm64/KimiDesk.app`、`release/KimiDesk-1.1.1-arm64.dmg`
+- **Windows**: `release/win-unpacked/`、`release/KimiDesk-1.1.1.exe`
+- **Linux**: `release/linux-unpacked/`、`release/KimiDesk-1.1.1.AppImage`
 
 ## 📊 状态栏
 
@@ -107,6 +107,11 @@ KimiDesk/
 - 状态栏图标：`assets/trayTemplate.png`、`assets/trayTemplate@2x.png`
 
 ## 📝 更新日志
+
+### 1.1.1
+
+- 修复 kimi code 自动更新失效、反复提示更新的问题：kimi 0.28.1/0.29.0 的 `kimi upgrade` 会把平台误识别为 windows 并拒绝自升级，但仍以 exit 0 退出，应用误判升级成功
+- 升级后强制重新校验 `kimi --version` 是否达到目标版本；未达标时自动回退执行官方安装脚本（macOS/Linux），仍失败则提示手动升级
 
 ### 1.1.0
 

@@ -1,9 +1,12 @@
 import { spawn } from 'node:child_process'
-import { platform } from 'node:os'
+import { unlinkSync, writeFileSync } from 'node:fs'
+import { platform, tmpdir } from 'node:os'
+import { join } from 'node:path'
 import log from 'electron-log/main'
-import { findKimiExecutable } from './kimi-web'
+import { findKimiExecutable, getKimiCodeHome } from './kimi-web'
 
 const LATEST_VERSION_URL = 'https://code.kimi.com/kimi-code/latest'
+const INSTALL_SCRIPT_URL = 'https://code.kimi.com/kimi-code/install.sh'
 const CHECK_TIMEOUT_MS = 5000
 const UPGRADE_TIMEOUT_MS = 300_000
 
@@ -29,7 +32,12 @@ function compareVersions(a: string, b: string): number {
   return 0
 }
 
-function runCommand(command: string, args: string[], timeoutMs: number): Promise<string> {
+function runCommand(
+  command: string,
+  args: string[],
+  timeoutMs: number,
+  env?: Record<string, string>,
+): Promise<string> {
   return new Promise((resolve, reject) => {
     let out = ''
     let settled = false
@@ -37,6 +45,7 @@ function runCommand(command: string, args: string[], timeoutMs: number): Promise
     const child = spawn(command, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: platform() === 'win32',
+      env: env ? { ...process.env, ...env } : undefined,
     })
 
     const finish = (error?: Error) => {
@@ -96,10 +105,65 @@ export async function checkKimiCodeUpdate(): Promise<KimiUpdateCheck> {
   }
 }
 
-/** 执行 `kimi upgrade` 就地升级，exit code 非 0 或超时则 reject */
-export async function runKimiUpgrade(): Promise<void> {
+/** 升级是否生效：重新读取当前版本，达到 latest 即视为成功 */
+async function isUpgraded(command: string, latest: string): Promise<boolean> {
+  try {
+    const current = await readCurrentVersion(command)
+    log.info(`[update] verify: current=${current} target=${latest}`)
+    return compareVersions(current, latest) >= 0
+  } catch (error) {
+    log.warn('[update] verify failed:', error instanceof Error ? error.message : error)
+    return false
+  }
+}
+
+/**
+ * `kimi upgrade` 失效时的兜底：执行官方安装脚本（仅 macOS/Linux）。
+ * kimi 0.28.1 的 upgrade 会把平台误识别为 "native (windows)" 并拒绝自升级，
+ * 但仍以 exit 0 退出，因此必须靠版本校验发现问题再走到这里。
+ */
+async function runInstallScript(): Promise<string> {
+  const response = await fetch(INSTALL_SCRIPT_URL, { signal: AbortSignal.timeout(30_000) })
+  if (!response.ok) throw new Error(`install script fetch failed: HTTP ${response.status}`)
+  const scriptPath = join(tmpdir(), `kimi-code-install-${Date.now()}.sh`)
+  writeFileSync(scriptPath, await response.text(), { mode: 0o755 })
+  try {
+    return await runCommand('bash', [scriptPath], UPGRADE_TIMEOUT_MS, {
+      // 已安装过，无需再改 shell rc；安装目录与 findKimiExecutable 保持一致
+      KIMI_NO_MODIFY_PATH: '1',
+      KIMI_INSTALL_DIR: getKimiCodeHome(),
+    })
+  } finally {
+    try {
+      unlinkSync(scriptPath)
+    } catch {
+      // 临时文件清理失败可忽略
+    }
+  }
+}
+
+/**
+ * 升级 kimi code 到 latest。先尝试 `kimi upgrade`，随后重新校验版本
+ * （0.28.1 的 upgrade 会拒绝自升级但仍 exit 0，不校验就会被误判为成功）；
+ * 校验不通过时回退到官方安装脚本；最终版本仍不达标则 reject。
+ */
+export async function runKimiUpgrade(latest: string): Promise<void> {
   const command = findKimiExecutable()
   log.info(`[update] running: ${command} upgrade`)
-  const out = await runCommand(command, ['upgrade'], UPGRADE_TIMEOUT_MS)
-  log.info(`[update] upgrade output: ${out.trim()}`)
+  try {
+    const out = await runCommand(command, ['upgrade'], UPGRADE_TIMEOUT_MS)
+    log.info(`[update] upgrade output: ${out.trim()}`)
+  } catch (error) {
+    log.warn('[update] kimi upgrade failed:', error instanceof Error ? error.message : error)
+  }
+  if (await isUpgraded(command, latest)) return
+
+  if (platform() === 'win32') {
+    throw new Error('kimi upgrade 未能完成更新，请手动升级 kimi code')
+  }
+  log.info('[update] falling back to official install script')
+  const out = await runInstallScript()
+  log.info(`[update] install script output: ${out.trim()}`)
+  if (await isUpgraded(command, latest)) return
+  throw new Error(`更新未生效，请手动运行: curl -fsSL ${INSTALL_SCRIPT_URL} | bash`)
 }

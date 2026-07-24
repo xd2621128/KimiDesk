@@ -89,13 +89,17 @@ async function maybeUpdateKimiCode(): Promise<void> {
   }
 
   const { current, latest } = result
+  if (!current || !latest) {
+    setUpdateState({ phase: 'idle' })
+    return
+  }
   setUpdateState({ phase: 'available', current, latest })
   let choice = await waitUpdateChoice()
 
   while (choice === 'update') {
     setUpdateState({ phase: 'updating', current, latest })
     try {
-      await runKimiUpgrade()
+      await runKimiUpgrade(latest)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       log.error('[update] upgrade failed:', message)

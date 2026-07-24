@@ -59,7 +59,7 @@ function parseKimiServerUrl(output: string): { url: string; token?: string } | u
   return undefined
 }
 
-function getKimiCodeHome(): string {
+export function getKimiCodeHome(): string {
   return process.env.KIMI_CODE_HOME ?? join(homedir(), '.kimi-code')
 }
 

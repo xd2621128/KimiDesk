@@ -89,8 +89,15 @@ KimiDesk/
   `GET https://code.kimi.com/kimi-code/latest`（最新版本，纯文本），各 5s 超时；
   任何失败（断网、命令缺失、超时）都静默跳过，不阻塞启动；
 - 有更新时 splash 页面展示更新卡片（`v当前 → v最新`，「立即更新并重启」/「暂不更新」），
-  用户确认后执行 `kimi upgrade`（就地升级 `~/.kimi-code`，300s 超时），
-  成功后 `app.relaunch()` + `app.exit(0)`（`app.exit` 不触发 `before-quit`，
+  用户确认后先执行 `kimi upgrade`（就地升级 `~/.kimi-code`，300s 超时），
+  然后必须重新校验 `kimi --version` 是否达到目标版本：
+  kimi 0.28.1 的 upgrade 会把平台误识别为 `native (windows)` 并拒绝自升级，
+  但仍以 exit 0 退出，只看退出码会被误判为成功、陷入「重启后仍提示更新」循环；
+- 校验不通过时回退执行官方安装脚本（macOS/Linux）：
+  下载 `https://code.kimi.com/kimi-code/install.sh` 到临时文件后以
+  `KIMI_NO_MODIFY_PATH=1 KIMI_INSTALL_DIR=<kimi home>` 运行，再次校验版本，
+  仍不达标才进入 error 状态；Windows 无安装脚本兜底，直接报错提示手动升级；
+- 成功后 `app.relaunch()` + `app.exit(0)`（`app.exit` 不触发 `before-quit`，
   不会被 quit 拦截逻辑影响）；失败可重试或跳过；
 - 状态机：`idle → checking → available → updating → done/error`，
   主进程保存最新 `UpdateState` 并推送到 splash；
